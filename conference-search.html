@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>컨퍼런스 참가자 검색 (디버깅)</title>
+    <title>컨퍼런스 참가자 검색</title>
     <style>
         * {
             margin: 0;
@@ -19,7 +19,7 @@
         }
 
         .container {
-            max-width: 700px;
+            max-width: 600px;
             margin: 0 auto;
             background: white;
             border-radius: 16px;
@@ -88,20 +88,10 @@
             box-shadow: 0 8px 25px rgba(79, 70, 229, 0.3);
         }
 
-        .debug-button {
-            background: #10b981;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 14px;
-            cursor: pointer;
-            width: 100%;
-            margin-top: 10px;
-        }
-
-        .debug-button:hover {
-            background: #059669;
+        .search-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
         }
 
         .result {
@@ -168,24 +158,23 @@
             display: block;
         }
 
-        .debug-info {
-            background: #f0f9ff;
-            border: 1px solid #0ea5e9;
-            border-radius: 8px;
+        .loading {
+            display: none;
+            text-align: center;
             padding: 16px;
-            margin-top: 16px;
-            font-size: 11px;
-            white-space: pre-wrap;
-            max-height: 300px;
-            overflow-y: auto;
-            font-family: 'Courier New', monospace;
+            color: #6b7280;
+        }
+
+        .loading.show {
+            display: block;
         }
 
         .status {
-            padding: 10px;
-            border-radius: 6px;
-            margin-top: 10px;
-            font-size: 13px;
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 16px;
+            font-size: 14px;
+            text-align: center;
         }
 
         .status.success {
@@ -210,6 +199,31 @@
                 transform: translateY(0);
             }
         }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .spinner {
+            border: 2px solid #f3f4f6;
+            border-top: 2px solid #4f46e5;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+            }
+            
+            .header, .search-section {
+                padding: 20px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -228,12 +242,14 @@
                     placeholder="이메일 주소를 입력하세요 (예: user@example.com)"
                     autocomplete="email"
                 >
-                <button onclick="searchParticipant()" class="search-button">
+                <button onclick="searchParticipant()" class="search-button" id="searchBtn">
                     🔍 참가 정보 조회
                 </button>
-                <button onclick="debugSheet()" class="debug-button">
-                    🐛 디버그: 구글 시트 연결 확인
-                </button>
+            </div>
+            
+            <div id="loading" class="loading">
+                <div class="spinner"></div>
+                참가자 정보를 검색하고 있습니다...
             </div>
             
             <div id="result" class="result">
@@ -263,115 +279,30 @@
             </div>
 
             <div id="statusDiv"></div>
-            <div id="debugInfo" class="debug-info" style="display: none;"></div>
         </div>
     </div>
 
     <script>
-        // 여기에 본인의 정보를 넣으세요!
-        const SHEET_ID = '1I-G6EMqR4WwBHTF0a05oIRAlOY_ip_w_DwOckZ6Mgtg';
-        const API_KEY = 'AIzaSyA-bYtxMAFPcX4o4TINMuCE4rlljX5OKEs';
+        // ⚠️ 여기에 3단계에서 받은 Apps Script 웹 앱 URL을 넣으세요!
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbybE7ueH-bM96zkVurtboVahzTRZFofC_iXKZYeqWkvpS63-niN9n1W0NxF5Whk56PevQ/exec';
 
         function showStatus(message, isError = false) {
             const statusDiv = document.getElementById('statusDiv');
             statusDiv.innerHTML = `<div class="status ${isError ? 'error' : 'success'}">${message}</div>`;
         }
 
-        // 디버깅 함수 - 구글 시트 데이터 확인
-        async function debugSheet() {
-            const debugDiv = document.getElementById('debugInfo');
-            debugDiv.style.display = 'block';
-            debugDiv.textContent = '🔄 데이터를 가져오는 중...';
-
-            showStatus('🔄 구글 시트 연결을 확인하고 있습니다...');
-
-            const range = 'Sheet1!A1:F10'; // 처음 10행만 확인
-            const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${range}?key=${API_KEY}`;
+        function showLoading(show) {
+            const loadingDiv = document.getElementById('loading');
+            const searchBtn = document.getElementById('searchBtn');
             
-            try {
-                console.log('🌐 요청 URL:', url);
-                
-                const response = await fetch(url);
-                const data = await response.json();
-                
-                if (data.error) {
-                    showStatus(`❌ API 오류: ${data.error.message}`, true);
-                    debugDiv.textContent = `❌ API 오류 상세:\n${JSON.stringify(data.error, null, 2)}`;
-                    return;
-                }
-                
-                if (!data.values || data.values.length === 0) {
-                    showStatus('❌ 구글 시트에 데이터가 없습니다.', true);
-                    debugDiv.textContent = '❌ 구글 시트가 비어있거나 데이터를 찾을 수 없습니다.';
-                    return;
-                }
-
-                showStatus(`✅ 성공! ${data.values.length}행의 데이터를 발견했습니다.`);
-                
-                let debugText = `✅ 성공! 구글 시트 연결됨\n\n`;
-                debugText += `📊 총 ${data.values.length}행의 데이터\n\n`;
-                debugText += `📋 헤더 (1행): ${JSON.stringify(data.values[0])}\n\n`;
-                debugText += `📝 실제 데이터 (처음 5행):\n`;
-                
-                for (let i = 1; i < Math.min(6, data.values.length); i++) {
-                    if (data.values[i]) {
-                        debugText += `${i}행: 이름="${data.values[i][0] || '없음'}", 이메일="${data.values[i][1] || '없음'}"\n`;
-                    }
-                }
-
-                debugText += `\n🔍 이메일 목록 (처음 10개):\n`;
-                for (let i = 1; i < Math.min(11, data.values.length); i++) {
-                    if (data.values[i] && data.values[i][1]) {
-                        debugText += `- ${data.values[i][1]}\n`;
-                    }
-                }
-                
-                debugDiv.textContent = debugText;
-                
-            } catch (error) {
-                showStatus(`❌ 네트워크 오류: ${error.message}`, true);
-                debugDiv.textContent = `❌ 네트워크 오류:\n${error.message}\n\n요청 URL:\n${url}`;
-                console.error('네트워크 오류:', error);
-            }
-        }
-
-        // 실제 구글 시트에서 데이터 가져오기
-        async function fetchGoogleSheetData() {
-            const range = 'Sheet1!A1:F544';
-            const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${range}?key=${API_KEY}`;
-            
-            try {
-                const response = await fetch(url);
-                const data = await response.json();
-                
-                if (data.error) {
-                    console.error('API 오류:', data.error);
-                    showStatus(`❌ API 오류: ${data.error.message}`, true);
-                    return [];
-                }
-                
-                if (!data.values || data.values.length === 0) {
-                    showStatus('❌ 구글 시트에 데이터가 없습니다.', true);
-                    return [];
-                }
-
-                // 첫 번째 행은 제목이니까 제외하고, 나머지 데이터를 정리해요
-                const rows = data.values.slice(1);
-                const participants = rows.map(row => ({
-                    name: row[0] || '',
-                    email: row[1] || '',
-                    accommodation: row[2] || '',
-                    vehicle: row[3] || '',
-                    bpSession: row[4] || '',
-                    lunchVenue: row[5] || ''
-                }));
-                
-                console.log(`📊 총 ${participants.length}명의 참가자 데이터를 로드했습니다.`);
-                return participants;
-            } catch (error) {
-                console.error('데이터를 가져올 수 없어요:', error);
-                showStatus(`❌ 네트워크 오류: ${error.message}`, true);
-                return [];
+            if (show) {
+                loadingDiv.classList.add('show');
+                searchBtn.disabled = true;
+                searchBtn.textContent = '🔄 검색 중...';
+            } else {
+                loadingDiv.classList.remove('show');
+                searchBtn.disabled = false;
+                searchBtn.textContent = '🔍 참가 정보 조회';
             }
         }
 
@@ -384,6 +315,7 @@
             // 초기화
             resultDiv.classList.remove('show');
             errorDiv.classList.remove('show');
+            document.getElementById('statusDiv').innerHTML = '';
             
             if (!email) {
                 alert('이메일 주소를 입력해주세요.');
@@ -397,46 +329,45 @@
                 return;
             }
 
-            showStatus('🔄 참가자 정보를 검색하고 있습니다...');
-
-            // 구글 시트에서 데이터 가져오기
-            const allParticipants = await fetchGoogleSheetData();
-            
-            if (allParticipants.length === 0) {
-                showStatus('❌ 구글 시트에서 데이터를 가져올 수 없습니다.', true);
+            // URL 확인
+            if (APPS_SCRIPT_URL.includes('여기에_웹앱_URL_넣기')) {
+                showStatus('❌ Apps Script 웹 앱 URL을 설정해주세요!', true);
                 return;
             }
 
-            console.log('🔍 검색할 이메일:', email);
-            console.log('📊 전체 참가자 수:', allParticipants.length);
-            
-            // 이메일로 검색 (대소문자 구분 안 함, 공백 제거)
-            const participant = allParticipants.find(p => 
-                p.email.toLowerCase().trim() === email.toLowerCase().trim()
-            );
-            
-            if (participant && participant.name) {
-                showStatus(`✅ ${participant.name}님을 찾았습니다!`);
+            showLoading(true);
+
+            try {
+                const url = `${APPS_SCRIPT_URL}?email=${encodeURIComponent(email)}`;
+                console.log('요청 URL:', url);
                 
-                // 결과 표시
-                document.getElementById('resultHeader').textContent = 
-                    `${participant.name}님의 컨퍼런스 참가 정보를 알려드려요! 🎉`;
-                document.getElementById('accommodation').textContent = participant.accommodation || '정보 없음';
-                document.getElementById('vehicle').textContent = participant.vehicle || '정보 없음';
-                document.getElementById('bpSession').textContent = participant.bpSession || '정보 없음';
-                document.getElementById('lunchVenue').textContent = participant.lunchVenue || '정보 없음';
+                const response = await fetch(url);
+                const data = await response.json();
                 
-                resultDiv.classList.add('show');
-            } else {
-                showStatus('❌ 해당 이메일로 등록된 참가자를 찾을 수 없습니다.', true);
+                if (data.success) {
+                    const participant = data.data;
+                    showStatus(`✅ ${participant.name}님을 찾았습니다!`);
+                    
+                    // 결과 표시
+                    document.getElementById('resultHeader').textContent = 
+                        `${participant.name}님의 컨퍼런스 참가 정보를 알려드려요! 🎉`;
+                    document.getElementById('accommodation').textContent = participant.accommodation || '정보 없음';
+                    document.getElementById('vehicle').textContent = participant.vehicle || '정보 없음';
+                    document.getElementById('bpSession').textContent = participant.bpSession || '정보 없음';
+                    document.getElementById('lunchVenue').textContent = participant.lunchVenue || '정보 없음';
+                    
+                    resultDiv.classList.add('show');
+                } else {
+                    showStatus(data.message || '참가자를 찾을 수 없습니다.', true);
+                    errorDiv.classList.add('show');
+                }
+                
+            } catch (error) {
+                console.error('검색 오류:', error);
+                showStatus(`❌ 오류가 발생했습니다: ${error.message}`, true);
                 errorDiv.classList.add('show');
-                
-                // 디버깅 정보 표시
-                console.log('❌ 일치하는 참가자를 찾지 못했습니다.');
-                console.log('📧 등록된 이메일 목록 (처음 10개):');
-                allParticipants.slice(0, 10).forEach((p, index) => {
-                    console.log(`${index + 1}. "${p.email}"`);
-                });
+            } finally {
+                showLoading(false);
             }
         }
 
