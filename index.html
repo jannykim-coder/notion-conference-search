@@ -94,6 +94,22 @@
             transform: none;
         }
 
+        .debug-button {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        .debug-button:hover {
+            background: #059669;
+        }
+
         .result {
             display: none;
             animation: fadeInUp 0.5s ease;
@@ -189,6 +205,20 @@
             border: 1px solid #ef4444;
         }
 
+        .debug-info {
+            background: #f0f9ff;
+            border: 1px solid #0ea5e9;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 16px;
+            font-size: 11px;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            display: none;
+        }
+
         @keyframes fadeInUp {
             from {
                 opacity: 0;
@@ -245,6 +275,9 @@
                 <button onclick="searchParticipant()" class="search-button" id="searchBtn">
                     🔍 참가 정보 조회
                 </button>
+                <button onclick="debugCSV()" class="debug-button">
+                    🐛 디버그: CSV 데이터 확인
+                </button>
             </div>
             
             <div id="loading" class="loading">
@@ -279,12 +312,12 @@
             </div>
 
             <div id="statusDiv"></div>
+            <div id="debugInfo" class="debug-info"></div>
         </div>
     </div>
 
     <script>
-        // ⚠️ 여기에 3단계에서 받은 Apps Script 웹 앱 URL을 넣으세요!
-        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzFSTsjo42kRJZK0m62pekFZKlR41KRXAeu1XPdtDOjcptZYA8Y6KODWEeuFpcvrPW-rw/exec';
+        let csvData = null; // CSV 데이터를 저장할 변수
 
         function showStatus(message, isError = false) {
             const statusDiv = document.getElementById('statusDiv');
@@ -304,6 +337,108 @@
                 searchBtn.disabled = false;
                 searchBtn.textContent = '🔍 참가 정보 조회';
             }
+        }
+
+        // CSV 파일을 파싱하는 함수
+        function parseCSV(text) {
+            const lines = text.split('\n');
+            const result = [];
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                
+                // 간단한 CSV 파싱 (따옴표 처리)
+                const values = [];
+                let current = '';
+                let inQuotes = false;
+                
+                for (let j = 0; j < line.length; j++) {
+                    const char = line[j];
+                    
+                    if (char === '"') {
+                        inQuotes = !inQuotes;
+                    } else if (char === ',' && !inQuotes) {
+                        values.push(current.trim());
+                        current = '';
+                    } else {
+                        current += char;
+                    }
+                }
+                values.push(current.trim());
+                
+                result.push(values);
+            }
+            
+            return result;
+        }
+
+        // CSV 데이터 로드
+        async function loadCSVData() {
+            if (csvData) return csvData; // 이미 로드되었으면 재사용
+            
+            try {
+                const response = await fetch('./conference-data.csv');
+                if (!response.ok) {
+                    throw new Error(`CSV 파일을 찾을 수 없습니다: ${response.status}`);
+                }
+                
+                const text = await response.text();
+                const parsed = parseCSV(text);
+                
+                // 첫 번째 행은 헤더, 나머지는 데이터
+                csvData = {
+                    headers: parsed[0],
+                    data: parsed.slice(1).map(row => ({
+                        name: row[0] || '',
+                        email: row[1] || '',
+                        accommodation: row[2] || '',
+                        vehicle: row[3] || '',
+                        bpSession: row[4] || '',
+                        lunchVenue: row[5] || ''
+                    }))
+                };
+                
+                return csvData;
+                
+            } catch (error) {
+                console.error('CSV 로드 오류:', error);
+                showStatus(`❌ CSV 파일 로드 실패: ${error.message}`, true);
+                return null;
+            }
+        }
+
+        // 디버깅 함수
+        async function debugCSV() {
+            const debugDiv = document.getElementById('debugInfo');
+            debugDiv.style.display = 'block';
+            debugDiv.textContent = '🔄 CSV 파일을 로딩하는 중...';
+
+            const data = await loadCSVData();
+            
+            if (!data) {
+                debugDiv.textContent = '❌ CSV 파일을 로드할 수 없습니다.\n\n1. conference-data.csv 파일이 GitHub 저장소에 업로드되었는지 확인\n2. 파일명이 정확한지 확인\n3. 파일이 UTF-8로 인코딩되었는지 확인';
+                return;
+            }
+
+            let debugText = `✅ CSV 파일 로드 성공!\n\n`;
+            debugText += `📊 총 ${data.data.length}명의 참가자 데이터\n\n`;
+            debugText += `📋 헤더: ${JSON.stringify(data.headers)}\n\n`;
+            debugText += `📝 실제 데이터 (처음 5명):\n`;
+            
+            data.data.slice(0, 5).forEach((participant, index) => {
+                debugText += `${index + 1}. 이름: "${participant.name}", 이메일: "${participant.email}"\n`;
+            });
+
+            debugText += `\n🔍 이메일 목록 (처음 10개):\n`;
+            data.data.slice(0, 10).forEach((participant, index) => {
+                if (participant.email) {
+                    debugText += `${index + 1}. ${participant.email}\n`;
+                }
+            });
+            
+            debugDiv.textContent = debugText;
+            showStatus(`✅ CSV 파일에서 ${data.data.length}명의 참가자 데이터를 로드했습니다.`);
         }
 
         // 검색 함수
@@ -329,46 +464,48 @@
                 return;
             }
 
-            // URL 확인
-            if (APPS_SCRIPT_URL.includes('여기에_웹앱_URL_넣기')) {
-                showStatus('❌ Apps Script 웹 앱 URL을 설정해주세요!', true);
+            showLoading(true);
+            showStatus('🔄 CSV 데이터를 로딩하고 있습니다...');
+
+            // CSV 데이터 로드
+            const data = await loadCSVData();
+            
+            if (!data) {
+                showLoading(false);
+                showStatus('❌ 데이터를 로드할 수 없습니다. CSV 파일을 확인해주세요.', true);
                 return;
             }
 
-            showLoading(true);
+            showStatus('🔍 참가자를 검색하고 있습니다...');
 
-            try {
-                const url = `${APPS_SCRIPT_URL}?email=${encodeURIComponent(email)}`;
-                console.log('요청 URL:', url);
+            // 이메일로 검색
+            const participant = data.data.find(p => 
+                p.email.toLowerCase().trim() === email.toLowerCase().trim()
+            );
+            
+            if (participant && participant.name) {
+                showStatus(`✅ ${participant.name}님을 찾았습니다!`);
                 
-                const response = await fetch(url);
-                const data = await response.json();
+                // 결과 표시
+                document.getElementById('resultHeader').textContent = 
+                    `${participant.name}님의 컨퍼런스 참가 정보를 알려드려요! 🎉`;
+                document.getElementById('accommodation').textContent = participant.accommodation || '정보 없음';
+                document.getElementById('vehicle').textContent = participant.vehicle || '정보 없음';
+                document.getElementById('bpSession').textContent = participant.bpSession || '정보 없음';
+                document.getElementById('lunchVenue').textContent = participant.lunchVenue || '정보 없음';
                 
-                if (data.success) {
-                    const participant = data.data;
-                    showStatus(`✅ ${participant.name}님을 찾았습니다!`);
-                    
-                    // 결과 표시
-                    document.getElementById('resultHeader').textContent = 
-                        `${participant.name}님의 컨퍼런스 참가 정보를 알려드려요! 🎉`;
-                    document.getElementById('accommodation').textContent = participant.accommodation || '정보 없음';
-                    document.getElementById('vehicle').textContent = participant.vehicle || '정보 없음';
-                    document.getElementById('bpSession').textContent = participant.bpSession || '정보 없음';
-                    document.getElementById('lunchVenue').textContent = participant.lunchVenue || '정보 없음';
-                    
-                    resultDiv.classList.add('show');
-                } else {
-                    showStatus(data.message || '참가자를 찾을 수 없습니다.', true);
-                    errorDiv.classList.add('show');
-                }
-                
-            } catch (error) {
-                console.error('검색 오류:', error);
-                showStatus(`❌ 오류가 발생했습니다: ${error.message}`, true);
+                resultDiv.classList.add('show');
+            } else {
+                showStatus('❌ 해당 이메일로 등록된 참가자를 찾을 수 없습니다.', true);
                 errorDiv.classList.add('show');
-            } finally {
-                showLoading(false);
+                
+                console.log('검색 결과 없음. 등록된 이메일 목록:');
+                data.data.slice(0, 10).forEach((p, index) => {
+                    console.log(`${index + 1}. "${p.email}"`);
+                });
             }
+            
+            showLoading(false);
         }
 
         // Enter 키 이벤트 처리
